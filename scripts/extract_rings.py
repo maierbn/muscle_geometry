@@ -310,7 +310,7 @@ for (no,p) in enumerate(stl_mesh.points):
     print "    create loop with {} points: {}".format(len(loop_points), loop_points)
   loops.append(loop_points)
   
-with open('loops', 'wb') as f:
+with open('rings_extracted', 'wb') as f:
   pickle.dump(loops, f)
   
 # create output mesh

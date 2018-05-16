@@ -317,7 +317,7 @@ print "length of loops:"
 for (loop,z_value) in zip(loops,z_samples):
   print "z = {}, n segments: {}".format(z_value,len(loop))
         
-with open('rings', 'wb') as f:
+with open('rings_created', 'wb') as f:
   pickle.dump(loops, f)
   
 # create output mesh
