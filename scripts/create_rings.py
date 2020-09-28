@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 # -*- coding: utf-8 -*-
 #
 # This script extracts horizontal rings of edges from the stl mesh of biceps. The rings are not planar (but almost).
@@ -129,8 +129,19 @@ def get_intersecting_line_segment(triangle, z_value):
 # parse command line arguments
 infile = "in.stl"
 
+# parameters
+# for initial mesh
+bottom_clip = -600.0     # bottom clip plane of triangles that will not be considered
+top_clip = -290.0        # top clip plane
+
+# for repaired mesh
+bottom_clip = 37.0
+top_clip = 300.0
+
+n_loops = 20   # number of rings to extract
+
 if len(sys.argv) < 2:
-  print "usage: create_rings.py <input file>"
+  print "usage: create_rings.py <input file> [n rings]"
   sys.exit(0)
 
 if len(sys.argv) >= 2:
@@ -139,6 +150,10 @@ if len(sys.argv) >= 2:
   else:
     print "File \"{}\" does not exists".format(sys.argv[1])
     sys.exit(0)
+  
+if len(sys.argv) >= 3:
+  n_loops = int(sys.argv[2])
+  print "n loops: {}".format(n_loops)
   
 print "Input file: \"{}\"".format(infile)
 
@@ -151,11 +166,6 @@ n_is_inside_2 = 0
 
 n_triangles = len(stl_mesh.points)
 
-# parameters
-bottom_clip = -600.0     # bottom clip plane of triangles that will not be considered
-top_clip = -290.0        # top clip plane
-
-n_loops = 20   # number of rings to extract
 z_samples = np.linspace(bottom_clip, top_clip, n_loops)
 print len(z_samples)
 

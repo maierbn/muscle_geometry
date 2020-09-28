@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python2.7
 # -*- coding: utf-8 -*-
 
 import sys, os
@@ -65,7 +65,18 @@ def triangle_contains_point(triangle, point):
 # constant parameters
 triangulation_type = 1  # 0 = scipy, 1 = triangle, 2 = custom (1 is best)
 parametric_space_shape = 3   # 0 = unit circle, 1 = unit square, 2 = unit square with adjusted grid, 3 = unit circle with adjusted grid
+max_area_factor = 2.    # only for triangulation_type 1, approximately the minimum number of triangles that will be created because of a maximum triangle area constraint
+show_plot = False
 
+n_points_x = 4    # number of points per dimension for the initial triangulation, assuming a cube reference area (4*n_points_x on circumference for unit circle)
+
+n_grid_points_x = n_points_x+1   # grid width of generated 2d mesh
+n_grid_points_y = n_points_x+1
+
+if parametric_space_shape == 0:  # for unit circle 
+  n_grid_points_y = 20
+  
+  
 # read in loops
 with open('rings', 'rb') as f:
   loops = pickle.load(f)
@@ -102,6 +113,14 @@ for loop in loops:
     sorted_loop = loop[start_point_index:] + loop[0:start_point_index]
   #sorted_loop = loop
   
+  # find out orientation
+  center_point = sum(sorted_loop)/len(sorted_loop)
+  up = np.cross((-center_point + sorted_loop[0]),(-center_point + sorted_loop[1]))
+  
+  # if orientation is clockwise, reverse order of points in loop
+  if np.sign(np.dot(up, np.array([0,0,1.0]))) < 0:
+    sorted_loop = sorted_loop[::-1]
+    
   if debug:
     print "loop"
     print loop
@@ -116,13 +135,20 @@ for loop in loops:
 
 # note: the first and last point in the loop is the same, because it represents the edges between the points
 
-n_points_x = 10
 n_points = 4*n_points_x
   
+# triangle lists for debugging output to stl files
 out_triangulation_world_space = []
 markers_border_points_world_space = []
+out_triangulation_parametric_space = []
+grid_triangles_world_space = []
+grid_triangles_parametric_space = []
+markers_grid_points_parametric_space = []
+markers_grid_points_world_space = []
+ 
+loop_grid_points = []  # list of grid point, for every slice, only contains loops that are not empty
   
-debug = True
+debug = False
   
 # sample loop with 4*n_points_x equidistant points
 for loop_no,(loop,length) in enumerate(zip(sorted_loops,lengths)):
@@ -131,12 +157,13 @@ for loop_no,(loop,length) in enumerate(zip(sorted_loops,lengths)):
     continue
     
   # for debugging only consider loop_no
-  if loop_no != 2:
-    continue
+  #if loop_no != 2:
+  #  continue
     
   print "loop with {} points, length: {}".format(len(loop), length)
   
   border_points = []
+  n_points = 4*n_points_x
   h = float(length) / n_points
   
   # loop over points of loop
@@ -217,6 +244,8 @@ for loop_no,(loop,length) in enumerate(zip(sorted_loops,lengths)):
     print "border points: ",len(border_points)
     print border_points
   
+  print "n border points: ",len(border_points)
+  
   points = np.reshape(border_points,(n_points,3))
   
   if debug:  
@@ -286,11 +315,12 @@ for loop_no,(loop,length) in enumerate(zip(sorted_loops,lengths)):
     
     data = {"vertices": projected_points, "segments": segments}
   
-    max_area = extent_x * extent_y / 50.
-    print "maximum area: ",max_area
+    max_area = extent_x * extent_y / max_area_factor
+    if debug:
+      print "maximum area: ",max_area
   
     #triangulation = triangle.triangulate(data, 'pq')
-    triangulation = triangle.triangulate(data, 'pq30a'+str(max_area))
+    triangulation = triangle.triangulate(data, 'pqa'+str(max_area))
     triangulated_projected_points = np.array(triangulation['vertices'])
     
     # transform projected points back to 3D points
@@ -328,6 +358,8 @@ for loop_no,(loop,length) in enumerate(zip(sorted_loops,lengths)):
       point_indices_list.append([center_point_index, i, i+1])
     point_indices_list.append([center_point_index, n_points-2, 0])
     triangle_list = points[point_indices_list]
+    
+  print "number of projected points: ",len(projected_points),", number of initial triangles: ", len(point_indices_list)
     
   # solve Laplace equation on deformed mesh
   n_dofs = n_points
@@ -422,7 +454,8 @@ for loop_no,(loop,length) in enumerate(zip(sorted_loops,lengths)):
   rhs_u = np.zeros((n_dofs,1))
   rhs_v = np.zeros((n_dofs,1))
   
-  print "n_dofs=",n_dofs,",n_original_points=",n_original_points
+  if debug:
+    print "n_dofs=",n_dofs,",n_original_points=",n_original_points
   
   # loop over boundary points, `original_points` are the points of the ring surface, `points` is a superset containing additional points created by the triangulation
   for original_point_no,original_point in enumerate(original_points):
@@ -549,15 +582,17 @@ for loop_no,(loop,length) in enumerate(zip(sorted_loops,lengths)):
     non_dirichlet_u = np.linalg.solve(global_stiffness_non_dirichlet, rhs_non_dirichlet_u)
     non_dirichlet_v = np.linalg.solve(global_stiffness_non_dirichlet, rhs_non_dirichlet_v)
     
-    print "rhs_non_dirichlet_u:",rhs_non_dirichlet_u
-    print "global_stiffness_non_dirichlet:",global_stiffness_non_dirichlet
-    print "non_dirichlet_u:",non_dirichlet_u
-    print "non_dirichlet_v:",non_dirichlet_v
+    if debug:
+      print "rhs_non_dirichlet_u:",rhs_non_dirichlet_u
+      print "global_stiffness_non_dirichlet:",global_stiffness_non_dirichlet
+      print "non_dirichlet_u:",non_dirichlet_u
+      print "non_dirichlet_v:",non_dirichlet_v
     
     u = np.concatenate([dirichlet_u[0:n_original_points], non_dirichlet_u])
     v = np.concatenate([dirichlet_v[0:n_original_points], non_dirichlet_v])
     
-    print "u:",u
+    if debug:
+      print "u:",u
     
   # output solution
   for dof_no in range(n_dofs):
@@ -570,8 +605,9 @@ for loop_no,(loop,length) in enumerate(zip(sorted_loops,lengths)):
         original_point_no = no
         break
         
-    print "dof {}, original point no: {}, dirichlet: ({},{}), solution: ({},{}), rhs: ({},{})".\
-      format(dof_no, original_point_no, dirichlet_u[dof_no], dirichlet_v[dof_no], u[dof_no], v[dof_no], rhs_u[dof_no], rhs_v[dof_no])
+    if debug:
+      print "dof {}, original point no: {}, dirichlet: ({},{}), solution: ({},{}), rhs: ({},{})".\
+        format(dof_no, original_point_no, dirichlet_u[dof_no], dirichlet_v[dof_no], u[dof_no], v[dof_no], rhs_u[dof_no], rhs_v[dof_no])
       
   # store the triangles in parametric space
   triangles_parametric_space = []
@@ -589,11 +625,11 @@ for loop_no,(loop,length) in enumerate(zip(sorted_loops,lengths)):
     # store triangle to list of triangles
     triangles_parametric_space.append(triangle_parametric_space)
     
+    
   # create parametric space triangles for debugging output, move near ring and scale 10x
   x_offset = center_point[0] + extent_x*1.5
   y_offset = center_point[1]
   scale = 10.0
-  out_triangulation_parametric_space = []
   for triangle_parametric_space in triangles_parametric_space:
     
     out_triangle_parametric_space = []
@@ -604,10 +640,7 @@ for loop_no,(loop,length) in enumerate(zip(sorted_loops,lengths)):
     
   # now the mapping x -> u,v is computed
   # create new grid points on the ring that form a uniform mesh in parametric space
-  n_grid_points_x = 11
-  n_grid_points_y = 11
-  if parametric_space_shape == 0:  # unit circle 
-    n_grid_points_y = 20
+
   n_grid_points = n_grid_points_x*n_grid_points_y
   grid_points_world_space = np.empty((n_grid_points,3))
   grid_points_parametric_space = np.empty((n_grid_points,2))
@@ -729,9 +762,60 @@ for loop_no,(loop,length) in enumerate(zip(sorted_loops,lengths)):
           break
           
       if xi_point is None:
-        print "could not find triangle in parameter space for grid point (x,y) = ({},{})".format(x,y)
+        if parametric_space_shape == 0 or parametric_space_shape == 3:  # unit circle
+          phi = np.arctan2(x,y)
+          r = x / np.cos(phi)
+          print " (x,y) = ({},{}), (phi,r)=({}deg,{})".format(x,y,phi*180./np.pi,r)
+          if abs(r) <= 1e-10:
+            r_old = r
+            r = 1e-4*np.sign(r)
+            phi_old = phi
+            phi += 1e-4
+            x_old = x
+            y_old = y
+            x = r*np.cos(phi)
+            y = r*np.sin(phi)
+            print " adjust grid point (x,y) = ({},{})->({},{}), phi={}->{}, r={}->{}".format(x_old,y_old,x,y,phi_old,phi,r_old,r)
+          
+          elif abs(r) >= 1.0-1e-10:
+            r_old = r
+            r = 0.99*np.sign(r)
+            phi_old = phi
+            phi += 1e-4
+            x_old = x
+            y_old = y
+            x = r*np.cos(phi)
+            y = r*np.sin(phi)
+            print " adjust grid point (x,y) = ({},{})->({},{}), phi={}->{}, r={}->{}".format(x_old,y_old,x,y,phi_old,phi,r_old,r)
+          
+          else:
+            # move point a little
+            r_old = r
+            r = 0.99*r
+            phi_old = phi
+            phi += 1e-4
+            x_old = x
+            y_old = y
+            x = r*np.cos(phi)
+            y = r*np.sin(phi)
+            print " adjust grid point (x,y) = ({},{})->({},{}), phi={}->{}, r={}->{}".format(x_old,y_old,x,y,phi_old,phi,r_old,r)
+            
+            # try again to find triangle in parametric space which contains grid point
+            xi_point = None
+            triangle_parameteric_space_no = None
+            for (triangle_no,triangle_parametric_space) in enumerate(triangles_parametric_space):
+              (contains_point, xi) = triangle_contains_point(triangle_parametric_space, np.array([x,y]))
+              if contains_point:
+                xi_point = xi
+                triangle_parameteric_space_no = triangle_no
+                break
+        
+      if xi_point is None:
+        
+        print "could not find triangle in parameter space for grid point (x,y) = ({},{}), r={}".format(x,y,r)
         grid_points_world_space[j*n_grid_points_x+i] = np.array([0.0,0.0,0.0])
-      else:
+        
+      if xi_point is not None:
           
         triangle_world_space = triangle_list[triangle_parameteric_space_no]
         p1 = triangle_world_space[0]
@@ -742,11 +826,11 @@ for loop_no,(loop,length) in enumerate(zip(sorted_loops,lengths)):
         grid_points_world_space[j*n_grid_points_x+i] = point_world_space
         grid_points_parametric_space[j*n_grid_points_x+i] = np.array([x,y])
       
+  # store grid points in world space of current loop
+  loop_grid_points.append(grid_points_world_space)
+      
   # create triangles of new grid points mesh
-  grid_triangles_world_space = []
-  grid_triangles_parametric_space = []
-  markers_grid_points_parametric_space = []
-  markers_grid_points_world_space = []
+  grid_point_indices_world_space = []
   
   # loop over grid points in parametric space
   for (j,y) in enumerate(np.linspace(0.0,1.0,n_grid_points_y)):
@@ -807,6 +891,9 @@ for loop_no,(loop,length) in enumerate(zip(sorted_loops,lengths)):
       p2 = grid_points_world_space[(j+1)%n_grid_points_y*n_grid_points_x+i]
       p3 = grid_points_world_space[(j+1)%n_grid_points_y*n_grid_points_x+(i+1)%n_grid_points_x]
       
+      grid_point_indices_world_space.append([j*n_grid_points_x+i, j*n_grid_points_x+(i+1)%n_grid_points_x, (j+1)%n_grid_points_y*n_grid_points_x+(i+1)%n_grid_points_x])
+      grid_point_indices_world_space.append([j*n_grid_points_x+i, (j+1)%n_grid_points_y*n_grid_points_x+(i+1)%n_grid_points_x, (j+1)%n_grid_points_y*n_grid_points_x+i])
+      
       grid_triangles_world_space.append([p0,p1,p3])
       grid_triangles_world_space.append([p0,p3,p2])
       
@@ -818,9 +905,104 @@ for loop_no,(loop,length) in enumerate(zip(sorted_loops,lengths)):
       
       grid_triangles_parametric_space.append([p0,p1,p3])
       grid_triangles_parametric_space.append([p0,p3,p2])
+
+  # plot laplace solutions
+  x = np.reshape(points[:,0], (-1))
+  y = np.reshape(points[:,1], (-1))
+  u_list = np.reshape(u, (-1))
+  v_list = np.reshape(v, (-1))
+  
+  xw = np.reshape(grid_points_world_space[:,0], (-1))
+  yw = np.reshape(grid_points_world_space[:,1], (-1))
+
+  f, ax = plt.subplots(2,2)
+  
+  # u
+  ax[0,0].tricontourf(x,y,u_list, 20) # 20 contour levels
+  ax[0,0].triplot(x,y,point_indices_list,color='k')
+  ax[0,0].plot(x,y, 'ko')
+  ax[0,0].set_title('u, triangulation in world space')
+  ax[0,0].set_aspect('equal')
+  
+  # v
+  ax[0,1].tricontourf(x,y,v_list, 20) # 20 contour levels
+  ax[0,1].triplot(x,y,point_indices_list,color='k')
+  ax[0,1].plot(x,y, 'ko')
+  ax[0,1].set_title('v, triangulation in world space')
+  ax[0,1].set_aspect('equal')
   
   
+  # parametric space
+  ax[1,0].triplot(u_list,v_list,point_indices_list,color='k')
+  ax[1,0].plot(u_list,v_list, 'ko')
+  ax[1,0].set_title('triangulation in parametric space')
+  ax[1,0].set_aspect('equal')
   
+  # world space grid
+  ax[1,1].triplot(xw,yw,grid_point_indices_world_space,color='k')
+  ax[1,1].plot(xw,yw, 'ko')
+  ax[1,1].set_title('new grid in world space')
+  ax[1,1].set_aspect('equal')
+  
+  plt.savefig("out/harmonic_map_{}.png".format(loop_no))
+  if show_plot:
+    plt.show()
+  
+# create 3D mesh from grid points on slices
+nodes = []
+elements = []   # 8 node indices per element
+
+# fill list of nodes
+for grid_point_list in loop_grid_points:
+  nodes += list(grid_point_list)
+  
+# fill list of elements
+n_grid_points_per_loop = n_grid_points_x * n_grid_points_y
+n_loops = len(loop_grid_points)
+for loop_no in range(n_loops-1):
+  
+  grid_point_list_bottom = loop_grid_points[loop_no]
+  grid_point_list_top = loop_grid_points[loop_no+1]
+  
+  for j in range(n_grid_points_y-1):
+    for i in range(n_grid_points_x-1):
+      
+      
+      i0 = loop_no*n_grid_points_per_loop + j*n_grid_points_x+i
+      i1 = loop_no*n_grid_points_per_loop + j*n_grid_points_x+i+1
+      i2 = loop_no*n_grid_points_per_loop + (j+1)*n_grid_points_x+i
+      i3 = loop_no*n_grid_points_per_loop + (j+1)*n_grid_points_x+i+1
+      i4 = (loop_no+1)*n_grid_points_per_loop + j*n_grid_points_x+i
+      i5 = (loop_no+1)*n_grid_points_per_loop + j*n_grid_points_x+i+1
+      i6 = (loop_no+1)*n_grid_points_per_loop + (j+1)*n_grid_points_x+i
+      i7 = (loop_no+1)*n_grid_points_per_loop + (j+1)*n_grid_points_x+i+1
+      
+      elements.append([i0,i1,i2,i3,i4,i5,i6,i7])
+  
+# create stl mesh of 3D mesh
+out_3d_mesh_triangles = []
+for element in elements:
+  
+  p = []
+  for i in range(8):
+    p.append([])
+    p[i] = nodes[element[i]]
+  
+  out_3d_mesh_triangles += [
+    [p[0],p[3],p[1]],[p[0],p[2],p[3]],  # bottom
+    [p[4],p[5],p[7]],[p[4],p[7],p[6]],  # top
+    [p[0],p[1],p[5]],[p[0],p[5],p[4]],  # front
+    [p[2],p[7],p[3]],[p[2],p[6],p[7]],  # back
+    [p[2],p[0],p[4]],[p[2],p[4],p[6]],  # left
+    [p[1],p[3],p[7]],[p[1],p[7],p[5]]  # right
+  ]
+  
+# output nodes and elements
+with open('mesh', 'wb') as f:
+  pickle.dump({"nodePositions": nodes, "elements": elements}, f)
+  
+  
+# write debugging output stl meshes
 def write_stl(triangles, outfile, description):
   # create output mesh
   n_triangles = len(triangles)
@@ -844,6 +1026,7 @@ write_stl(grid_triangles_parametric_space,     "mesh_05_grid_triangles_p.stl","g
 write_stl(markers_grid_points_parametric_space,"mesh_06_grid_points_p.stl",   "grid points parametric space")
 write_stl(grid_triangles_world_space,          "mesh_07_grid_triangles_w.stl","grid world space")
 write_stl(markers_grid_points_world_space,     "mesh_08_grid_points_w.stl",   "grid points world space")
+write_stl(out_3d_mesh_triangles,               "mesh_09_3d_mesh_w.stl",       "3d mesh world space")
 
 
 
